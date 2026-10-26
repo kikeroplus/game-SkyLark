@@ -342,6 +342,7 @@ namespace SkyLark
       NameEntry,
       Ranking,   // 遊び終わったあとのランキング
       Intro,     // 日の始まりの旅の絵はがき
+      Ending,    // 最後の日のあとの結末
       Travel,    // 日の終わりに、地図の上を次の地方へ
     }
     public Mode mode = Mode.Attract;
@@ -387,7 +388,6 @@ namespace SkyLark
     bool stonePlanned, lochPlanned, stoneFound, nessieFound;
     int plainLen, stoneCol, lochLen;
     bool cropPlanned, cropTopNext, cropFound, beastDone, beastFound;
-    bool lochPropDone;
     int lochTotal = LOCH_ROWS, lakeCool;
     int cropLen, cropC;
     float lochC, lochR;
@@ -436,7 +436,7 @@ namespace SkyLark
     float rainK()
     {
       float k = ramp(rainAt(), rainAt() + 6 * FPS) - ramp(rainEnd(), rainEnd() + 6 * FPS);
-      return region == 1 ? k * 0.75f : k; // 湖水地方は霧雨
+      return region == 1 ? k * 0.75f : region == 3 ? 0 : region == 4 ? k * 0.7f : k; // 湖水地方は霧雨、コーンウォールは晴れ、高地は雪
     }
     float sunsetK() { return ramp(SUNSET_AT, SUNSET_AT + 35 * FPS); }
     float duskK() { return ramp(DUSK_AT, DUSK_AT + 25 * FPS); }
@@ -471,11 +471,20 @@ namespace SkyLark
     static readonly byte[] VALE = { 0, 0, 0, 0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6 };
     static readonly byte[] FELL = { 0, 0, 0, 0, 0, 0, 1, 1, 2, 3 };
     static readonly byte[] LAKES = { 0, 0, 0, 0, 0, 0, 0, 1, 1, 2 };
+    static readonly byte[] YORKS = { 0, 0, 0, 0, 2, 2, 3, 3, 3, 1 }; // 秋: 刈り取ったあとの麦と耕した畑
+    static readonly byte[] CORNW = { 0, 0, 0, 1, 1, 1, 2, 4, 4, 5 };
+    static readonly byte[] HIGHL = { 0, 0, 0, 0, 0, 0, 0, 0, 1, 3 };
     int pickCrop()
     {
-      // 山のほうは牧草地ばかり。谷は色とりどり。湖水地方はほとんど牧草地
+      // 山のほうは牧草地ばかり。谷は色とりどり。地方ごとに作物が違う
       if (region == 1)
         return LAKES[irand(0, 9)];
+      if (region == 2)
+        return YORKS[irand(0, 9)];
+      if (region == 3)
+        return CORNW[irand(0, 9)];
+      if (region == 4)
+        return HIGHL[irand(0, 9)];
       return fellK() > 0.5f ? FELL[irand(0, 9)] : VALE[irand(0, 19)];
     }
 
@@ -503,7 +512,7 @@ namespace SkyLark
     // 畑の 1 行。区画が終わったら、ときどき右どなりとまとめて分け直すので、境の生け垣の位置が動いていく
     void fieldRow(Tile[] row)
     {
-      int wall = fellK() > 0.5f || region == 1 ? STONEWALL : 0; // 湖水地方はどこも石垣
+      int wall = fellK() > 0.5f || region == 1 || region == 2 || region == 4 ? STONEWALL : 0; // 湖水地方とヨークシャーと高地はどこも石垣
       for (int c = 0; c < COLS;)
       {
         int e = c + segW[c];
@@ -529,11 +538,11 @@ namespace SkyLark
       for (int c = 0; c < COLS; c++)
       {
         // 雑木林
-        if (noise(c * 0.25f, n * 0.08f + 77) > (region == 1 ? 0.71f : 0.76f))
+        if (noise(c * 0.25f, n * 0.08f + 77) > (region == 1 ? 0.71f : region == 2 ? 0.74f : region == 4 ? 0.8f : 0.76f))
           row[c] = new Tile(WOOD, 0, 0);
         // 山: 高さが閾値を超えたところ。山がちになるほど閾値が下がる
         float h = noise(c * 0.16f, n * 0.05f + 300);
-        float thr = region == 1 ? 0.80f - 0.30f * f : 0.86f - 0.36f * f; // 湖水地方ははじめから山がち
+        float thr = region == 1 ? 0.80f - 0.30f * f : region == 4 ? 0.72f - 0.30f * f : region == 3 ? 0.88f - 0.30f * f : 0.86f - 0.36f * f; // 湖水地方と高地ははじめから山がち
         if (h > thr)
           row[c] = new Tile(MOOR, constrain(1 + (int)((h - thr) / 0.06f), 1, 4), 0);
       }
@@ -642,13 +651,13 @@ namespace SkyLark
         plainLen--;
       }
       // 湖水地方: ときどき湖ができる
-      if (region == 1 && lochLen == 0 && plainLen == 0 && --lakeCool <= 0)
+      if ((region == 1 || region == 4) && lochLen == 0 && plainLen == 0 && --lakeCool <= 0) // 湖水地方と高地: ときどき湖
       {
         lochTotal = lochLen = irand(14, 22);
         lochR = frand(3.5f, 6.0f);
         lochC = frand(lochR + 2, COLS - lochR - 3);
         laneOn = false;
-        lakeCool = irand(40, 90);
+        lakeCool = region == 1 ? irand(40, 90) : irand(70, 130);
       }
       // 湖 (ロッホ): 上下にふくらんだ楕円の水。まわりは葦の土手
       if (lochLen > 0)
@@ -665,6 +674,7 @@ namespace SkyLark
         }
         lochLen--;
       }
+      regionTerrain(row, n);
     }
 
     Prop addProp(float x, float y, int type, int v = 0)
@@ -695,56 +705,16 @@ namespace SkyLark
       Array.Copy(rowId, 0, rowId, 1, ROWS - 1);
       shiftRowCache();
       rowId[0] = rowCount++;
-      if (!stonePlanned && frame + LEAD >= STONE_AT) // ストーンヘンジの草原を作りはじめる (川と小道を避けた列に立てる)
-      {
-        stonePlanned = true;
-        plainLen = PLAIN_ROWS;
-        int best = COLS / 2, bestD = -1;
-        for (int c = 5; c <= COLS - 6; c++)
-        {
-          int dd = Math.Min(riverOn ? (int)Math.Abs(c - riverC) : 99, laneOn ? Math.Abs(c - laneCol) : 99);
-          dd = Math.Min(dd, 8) * 4 - Math.Abs(c - COLS / 2);
-          if (dd > bestD)
-          {
-            bestD = dd;
-            best = c;
-          }
-        }
-        stoneCol = best;
-      }
-      if (!cropPlanned && region == 0 && frame + LEAD >= CROP_AT) // ミステリーサークルの麦畑を作りはじめる (川と小道を避けた列に)
-      {
-        cropPlanned = true;
-        cropLen = CROP_ROWS;
-        int best = COLS / 2, bestD = -1;
-        for (int c = 7; c <= COLS - 8; c++)
-        {
-          int dd = Math.Min(riverOn ? (int)Math.Abs(c - riverC) : 99, laneOn ? Math.Abs(c - laneCol) : 99);
-          dd = Math.Min(dd, 9) * 4 - Math.Abs(c - COLS / 2);
-          if (dd > bestD)
-          {
-            bestD = dd;
-            best = c;
-          }
-        }
-        cropC = best;
-      }
-      if (!lochPlanned && frame + LEAD >= LOCH_AT) // 湖を作りはじめる
-      {
-        lochPlanned = true;
-        lochTotal = lochLen = LOCH_ROWS;
-        lochR = 7.0f;
-        lochC = frand(lochR + 2, COLS - lochR - 3);
-        laneOn = false;
-      }
+      planLandmarks(); // 名所の地形を作りはじめる (地方ごと)
       genRow(map[0], rowId[0]);
       // 畑や村の上に置くもの
       float y = scrollY - T + 4 - FAR * T;
       if (railRow)
       {
         railRow = false;
-        if (!train.on && !railPending && irand(0, 9) < 8) // 線路ができたら、たいてい汽車が来る (線路が画面の上の端まで来たら走りだす)
+        if (!train.on && !railPending && (forceTrain || irand(0, 9) < 8)) // 線路ができたら、たいてい汽車が来る (線路が画面の上の端まで来たら走りだす)
         {
+          forceTrain = false;
           railPending = true;
           railY = y;
         }
@@ -772,8 +742,9 @@ namespace SkyLark
         {
           if (t.v == PASTURE && r < 0.02f + 0.02f * fellK())
           {
+            bool cows = region == 4 && irand(0, 9) < 6; // 高地はハイランド牛が多い
             for (int i = 0, n = irand(3, 5); i < n; i++)
-              addProp(x + frand(-8, 8), y + frand(-6, 6), SHEEP, irand(0, 1));
+              addProp(x + frand(-8, 8), y + frand(-6, 6), cows ? COW : SHEEP, irand(0, 1));
             if (irand(0, 4) == 0) // ときどき牧羊犬がついている
             {
               Prop d = addProp(x, y, DOG);
@@ -807,24 +778,8 @@ namespace SkyLark
           }
         }
       }
-      if (cropPlanned && cropLen == CROP_ROWS / 2 && !hasProp(CROPCIRCLE))
-        addProp(cropC * T + 4, y, CROPCIRCLE);
-      if (stonePlanned && plainLen == PLAIN_ROWS / 2 - 1 && !hasProp(STONEHENGE))
-      {
-        Prop sh = addProp(stoneCol * T + 4, y, STONEHENGE);
-        if (sh != null)
-          sh.kind = region == 1 ? 1 : 0; // 湖水地方はキャッスルリッグ
-      }
-      if (lochPlanned && !lochPropDone && lochLen == LOCH_ROWS / 2 && !hasProp(NESSIE))
-      {
-        lochPropDone = true;
-        Prop n = addProp(lochC * T, y, NESSIE);
-        if (n != null)
-        {
-          n.ax = lochC * T;
-          n.kind = region == 1 ? 1 : 0; // 湖水地方はボウネッシー
-        }
-      }
+      placeLandmarks(y);
+      regionProps(y);
       for (int c = 0; c < COLS; c++) // 草原にも羊
         if (map[0][c].type == PLAIN && frand(0, 1) < 0.012f && Math.Abs(c - stoneCol) > 3)
           for (int i = 0, n = irand(3, 6); i < n; i++)
@@ -1152,7 +1107,7 @@ namespace SkyLark
       mom.x = W / 2.0f;
       mom.y = -50;
       mom.t = -1;
-      mom.maxHp = mom.hp = 160 + 50 * (day - 1);
+      mom.maxHp = mom.hp = (160 + 50 * (day - 1)) * (region == 4 ? 3 : 2) / 2; // 最後の日は大母船
       mom.hitT = mom.deadT = 0;
       Sfx(SkyLark.Sfx.Warning);
     }
@@ -1185,7 +1140,7 @@ namespace SkyLark
       // 落とした: 火を噴き、かけらを撒きながら地面へ落ちていく
       mom.dead = true;
       mom.deadT = CRASH_T;
-      score += 30000;
+      score += region == 4 ? 50000 : 30000;
       Sfx(SkyLark.Sfx.BigBoom);
       foreach (Shot s in theirs)
         s.on = false;
@@ -1501,10 +1456,11 @@ namespace SkyLark
       riverOn = laneOn = false;
       villageLen = 0;
       stonePlanned = lochPlanned = stoneFound = nessieFound = false;
-      cropPlanned = cropTopNext = cropFound = beastDone = beastFound = lochPropDone = false;
+      cropPlanned = cropTopNext = cropFound = beastDone = beastFound = false;
       cropLen = 0;
       lakeCool = 20;
       lochTotal = LOCH_ROWS;
+      resetRegionState();
       plainLen = lochLen = 0;
       splitSegs(0, COLS);
       foreach (Prop p in props)
@@ -1753,6 +1709,9 @@ namespace SkyLark
         case Mode.Travel:
           stepTravel(inp);
           break;
+        case Mode.Ending:
+          stepEnding(inp);
+          break;
         case Mode.Continue:
           if (inp.FirePressed || inp.StartPressed)
           {
@@ -1951,7 +1910,7 @@ namespace SkyLark
     {
       if (Snd == null)
         return;
-      bool frozen = Paused || mode == Mode.Continue || mode == Mode.Intro || mode == Mode.Travel;
+      bool frozen = Paused || mode == Mode.Continue || mode == Mode.Intro || mode == Mode.Travel || mode == Mode.Ending;
       float k = frozen ? 0 : demo ? 0.5f : 1;
       bool plane = !gone && deadT == 0 && py < H + 8 && (mode == Mode.Play || mode == Mode.Attract);
       Snd.Engine = plane ? k : 0;
@@ -2078,7 +2037,7 @@ namespace SkyLark
         else if (p.type == BOAT && p.y > -10) // ボート: 湖をゆっくり進み、岸に近づくと向きを変える
         {
           p.x += p.vx;
-          if (tileTypeAt(p.x + (p.vx > 0 ? 7 : -7), p.y) != WATER)
+          if (!isWater(tileTypeAt(p.x + (p.vx > 0 ? 7 : -7), p.y)))
             p.vx = -p.vx;
         }
         else if (p.type == DUCK)
@@ -2091,13 +2050,16 @@ namespace SkyLark
         if (p.y > H + (p.type == STONEHENGE ? 40 : 16) || p.x < -30 || p.x > W + 30)
           p.on = false;
       }
-      if (!beastDone && region == 0 && frame >= BEAST_AT && !gone) // ボドミンの野獣が画面の端から駆けてくる
+      if (!beastDone && (region == 2 || region == 3) && frame >= BEAST_AT && !gone) // ヨークシャーはブラック・シャック、コーンウォールはボドミンの野獣 // ボドミンの野獣が画面の端から駆けてくる
       {
         beastDone = true;
         int dir = irand(0, 1) != 0 ? 1 : -1;
         Prop b = addProp(dir > 0 ? -12 : W + 12, frand(50, 110), BEAST, dir > 0 ? 1 : 0);
         if (b != null)
+        {
           b.ox = b.x;
+          b.kind = region == 2 ? 1 : 0;
+        }
       }
       foreach (Prop p in props) // 名所から円盤が湧いてくる: ストーンヘンジは真ん中が光って地面から、湖は水の下から浮上
       {
@@ -2110,7 +2072,7 @@ namespace SkyLark
         if (canSpawn && (p.type == STONEHENGE ? p.t : p.t + 30) % period == period / 2)
         {
           float sx = p.type == STONEHENGE ? p.x : p.ax + frand(-26, 26), sy = p.type == STONEHENGE ? p.y - 2 : p.ay + frand(-30, 30);
-          if (p.type == NESSIE && tileTypeAt(sx, sy) != WATER)
+          if (p.type == NESSIE && !isWater(tileTypeAt(sx, sy)))
             continue;
           Ufo u = addUfo(SCOUT, sx, sy, 0);
           if (u != null)
@@ -2133,14 +2095,23 @@ namespace SkyLark
           {
             stoneFound = true;
             score += 3000;
-            addPop(p.x, p.y - 24, p.kind == 1 ? "CASTLERIGG" : "STONEHENGE", GOLD);
+            addPop(p.x, p.y - 24, p.kind == 1 ? "CASTLERIGG" : p.kind == 2 ? "ST MICHAEL'S MOUNT" : p.kind == 3 ? "EILEAN DONAN" : "STONEHENGE", GOLD);
             Sfx(SkyLark.Sfx.Discover);
           }
           else if (p.type == BEAST && !beastFound && fabsf(px - p.x) < 16 && fabsf(py - p.y) < 16)
           {
             beastFound = true;
             score += 4000;
-            addPop(p.x, p.y - 16, "BODMIN BEAST", 0xE8D040);
+            addPop(p.x, p.y - 16, p.kind == 1 ? "BLACK SHUCK" : "BODMIN BEAST", p.kind == 1 ? 0xF06040u : 0xE8D040u);
+            Sfx(SkyLark.Sfx.Discover);
+          }
+          else if ((p.type == ABBEY && !abbeyFound || p.type == VIADUCT && !viaductFound || p.type == WHITEHORSE && !horseFound) && fabsf(py - p.y) < 16 && (p.type == VIADUCT || fabsf(px - p.x) < 20))
+          {
+            if (p.type == ABBEY) abbeyFound = true;
+            else if (p.type == VIADUCT) viaductFound = true;
+            else horseFound = true;
+            score += 3000;
+            addPop(p.type == VIADUCT ? px : p.x, p.y - 22, p.type == ABBEY ? "WHITBY ABBEY" : p.type == VIADUCT ? "RIBBLEHEAD" : "WHITE HORSE", GOLD);
             Sfx(SkyLark.Sfx.Discover);
           }
           else if (p.type == CROPCIRCLE && !cropFound && p.t > 50 && fabsf(px - p.x) < 20 && fabsf(py - p.y) < 20)
@@ -2154,7 +2125,7 @@ namespace SkyLark
           {
             nessieFound = true;
             score += 5000;
-            addPop(p.x, p.y - 20, p.kind == 1 ? "BOWNESSIE!" : "NESSIE!", 0x9AF0B0);
+            addPop(p.x, p.y - 20, p.kind == 1 ? "BOWNESSIE!" : p.kind == 2 ? "MORGAWR!" : "NESSIE!", 0x9AF0B0);
             Sfx(SkyLark.Sfx.Discover);
           }
         }
@@ -2194,8 +2165,8 @@ namespace SkyLark
       if (rk > 0)
         foreach (Drop d in drops)
         {
-          d.x -= 1.5f;
-          if ((d.y += 9) > H || d.x < -4)
+          d.x -= region == 4 ? 0.5f + 0.4f * sinf((frame + d.y) * 0.05f) : 1.5f; // 高地は雪がふわふわ
+          if ((d.y += region == 4 ? 1.6f : 9) > H || d.x < -4)
           {
             d.x = frand(0, W + 60);
             d.y = frand(-20, 0);

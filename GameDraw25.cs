@@ -104,7 +104,7 @@ namespace SkyLark
         gl = new Gfx(SW, SH + GL_TOP);
         gl.OffY = GL_TOP;
         gl.UseMask();
-        cv = new Gfx(240, 200);
+        cv = new Gfx(340, 200);
         cv.Key = KEY;
       }
       g.UseMask();
@@ -141,13 +141,13 @@ namespace SkyLark
       for (int i = 0; i < props.Length; i++)
       {
         Prop p = props[i];
-        if (!p.on || p.type == DEBRIS || p.type == WRECK || p.type == CROPCIRCLE || p.ry < YT - 4 || p.ry > H + 50)
+        if (!p.on || p.type == DEBRIS || p.type == WRECK || p.type == CROPCIRCLE || p.type == WHITEHORSE || p.ry < YT - 4 || p.ry > H + 50)
           continue;
         int idx = i;
         items.Add(new KeyValuePair<float, Action>(p.ry, () => paperProp(g, p, idx)));
       }
       if (train.on)
-        items.Add(new KeyValuePair<float, Action>(train.ry, () => paperTrain(g)));
+        items.Add(new KeyValuePair<float, Action>(train.ry + 0.3f, () => paperTrain(g)));
       items.Sort((ia, ib) => ia.Key.CompareTo(ib.Key));
       foreach (var it in items)
         it.Value();
@@ -156,12 +156,16 @@ namespace SkyLark
       tint(g);
       drawLights25(g);
       drawRainbow(g, SW / 2, HZ + 260, 300);
+      drawSeasonFx(g, HZ + 10);
       float rk = rainK();
       if (rk > 0) // 雨粒 (画面に直接)
         for (int i = 0, n = (int)(drops.Length * rk); i < n; i++)
         {
           int x = S(drops[i].rx), y = S(drops[i].ry);
-          g.DrawLine(x, y, x - 2, y + 8, 0x98A8B8);
+          if (region == 4) // 雪
+            g.FillRect(x, y, 2, 2, 0xF4F8FC);
+          else
+            g.DrawLine(x, y, x - 2, y + 8, 0x98A8B8);
         }
       if (Paused || mode == Mode.Continue)
         dim(g);
@@ -196,6 +200,12 @@ namespace SkyLark
                 if (i * i + j * j <= 16)
                   g.BlendPixel(S(gx) + i, S(gy) + j, 0xF8FFD0, 150 - (i * i + j * j) * 8);
         }
+        else if (p.type == WHITEHORSE)
+          drawWhiteHorse(g, x, y);
+        else if (p.type == STONEHENGE && p.kind == 2)
+          drawMount(g, x, y, p, true, false);
+        else if (p.type == STONEHENGE && p.kind == 3)
+          drawCastleIsland(g, x, y, p, true, false);
         else if (p.type == STONEHENGE)
           if (p.kind == 1)
             for (int j = -50; j <= 50; j++) // キャッスルリッグ: 踏まれて薄くなった芝の輪
@@ -219,7 +229,7 @@ namespace SkyLark
           propShadow(g, p);
       foreach (Prop p in props) // ストーンヘンジ (キャッスルリッグ) の石の影 (斜めに伸ばす)
         if (p.on && p.type == STONEHENGE)
-          for (int k = 0, n = p.kind == 1 ? 36 : 16; k < n; k++)
+          for (int k = 0, n = p.kind == 1 ? 36 : p.kind == 0 ? 16 : 0; k < n; k++)
           {
             float a = k * (2 * PI / n) + 0.1f, rr = p.kind == 1 ? 34 : 38;
             int bx = S(p.rx) + (int)(cosf(a) * rr), by = S(p.ry) + (int)(sinf(a) * rr);
@@ -404,11 +414,11 @@ namespace SkyLark
             float alt = p.lift * 20 + (p.hop > 0 ? Math.Abs(sinf(p.hop * 0.42f)) * 4 : 0);
             bool flip = p.v == 0;
             if (p.type == SHEEP)
-              cutSprite(g, SHEEP_S, flip, region == 1 ? HERDWICK : null, wx, wy, alt, PAPER_K, true);
+              cutSprite(g, SHEEP_S, flip, region == 0 ? null : sheepPal(), wx, wy, alt, PAPER_K, true);
             else
             {
               int v = idx % 3;
-              cutSprite(g, COW_S, flip, v == 0 ? null : v == 1 ? COW_BROWN : COW_DARK, wx, wy, alt, PAPER_K, true);
+              cutSprite(g, COW_S, flip, region == 4 ? COW_HIGHLAND : v == 0 ? null : v == 1 ? COW_BROWN : COW_DARK, wx, wy, alt, PAPER_K, true);
             }
             if (p.hop > 12 && (p.hop % 16) < 10)
             {
@@ -434,9 +444,34 @@ namespace SkyLark
           break;
         case BEAST:
           if (p.t >= 60 && p.t < 130)
-            cutSprite(g, BEAST_SIT, false, null, wx, wy, 0, PAPER_K, true);
+            cutSprite(g, p.kind == 1 ? SHUCK_SIT : BEAST_SIT, false, null, wx, wy, 0, PAPER_K, true);
+          else if (p.kind == 1)
+            cutSprite(g, (frame / 3) % 2 != 0 ? SHUCK_A : SHUCK_B, p.v == 0, null, wx, wy, 0, PAPER_K, true);
           else
             cutSprite(g, (frame / 3) % 2 != 0 ? BEAST_A : BEAST_B, p.v == 0, null, wx, wy, 0, PAPER_K, true);
+          break;
+        case VIADUCT:
+          {
+            int w = SW + 4;
+            cutBegin(w, 30);
+            viaductFront(cv, w);
+            cutBlit(g, w, 30, w / 2, 29, wx, wy, 0, 1.0f, true);
+            break;
+          }
+        case ABBEY:
+          cutBegin(48, 48);
+          abbeyFront(cv);
+          cutBlit(g, 48, 48, 24, 47, wx, wy, 0, PAPER_K, true);
+          break;
+        case LIGHTHOUSE:
+          cutBegin(15, 40);
+          lighthouseFront(cv);
+          cutBlit(g, 15, 40, 7, 39, wx, wy, 0, PAPER_K, true);
+          break;
+        case MINE:
+          cutBegin(25, 30);
+          mineFront(cv);
+          cutBlit(g, 25, 30, 10, 29, wx, wy, 0, PAPER_K, true);
           break;
         case TREE:
           {
@@ -476,7 +511,10 @@ namespace SkyLark
           }
         case BARN:
           cutBegin(30, 25);
-          barnFront(cv);
+          if (p.kind == 1)
+            stoneBarnFront(cv);
+          else
+            barnFront(cv);
           cutBlit(g, 30, 25, 15, 24, wx, wy, 0, PAPER_K, true);
           break;
         case CHURCH:
@@ -491,7 +529,19 @@ namespace SkyLark
           break;
         case STONEHENGE:
           {
-            if (p.kind == 1) // キャッスルリッグ
+            if (p.kind == 2) // セント・マイケルズ・マウント (島は地面に描いてある)
+            {
+              cutBegin(80, 50);
+              mountFront(cv, 80, 50);
+              cutBlit(g, 80, 50, 40, 49, wx, wy, 0, 1.0f, true);
+            }
+            else if (p.kind == 3) // アイリーン・ドナン城
+            {
+              cutBegin(62, 33);
+              castleFront(cv, 62);
+              cutBlit(g, 62, 33, 13, 32, wx, wy, 0, PAPER_K, true);
+            }
+            else if (p.kind == 1) // キャッスルリッグ
             {
               cutBegin(90, 46);
               castleStones(cv, 45, 30, false);
@@ -523,12 +573,13 @@ namespace SkyLark
           {
             if (p.lift <= 0.02f)
               break;
-            cutBegin(42, 36);
-            if (p.kind == 1)
-              drawBownessie(cv, p, 21, 33);
+            int nw = p.kind == 2 ? 72 : 42, nh = 36, nax = nw / 2;
+            cutBegin(nw, nh);
+            if (p.kind >= 1)
+              drawBownessie(cv, p, nax, 33);
             else
-              drawNessie(cv, p, 21, 33);
-            cutBlit(g, 42, 36, 21, 33, wx, wy, 0, PAPER_K, false);
+              drawNessie(cv, p, nax, 33);
+            cutBlit(g, nw, nh, nax, 33, wx, wy, 0, PAPER_K, false);
             float sx, sy, sc;
             proj(wx, wy, 0, out sx, out sy, out sc);
             for (int w2 = 0; w2 < 2; w2++) // 波紋
@@ -737,7 +788,11 @@ namespace SkyLark
         cv.FillCircle(at(off + 4), by - 2, 2, 0x2A2A2A);
         cv.FillCircle(at(off + 19), by - 2, 2, 0x2A2A2A);
       }
-      cutBlit(g, w, h, fx_, by, train.rx, train.ry, 0, PAPER_K, true);
+      float talt = 0; // 高架橋の上を走るときは、橋の高さ
+      foreach (Prop vp in props)
+        if (vp.on && vp.type == VIADUCT && Math.Abs(vp.ry - train.ry) < 3)
+          talt = 30f / K;
+      cutBlit(g, w, h, fx_, by, train.rx, train.ry, talt, PAPER_K, true);
     }
 
     // ---- 飛ぶもの ----
@@ -1039,7 +1094,8 @@ namespace SkyLark
           g.FillCircle((int)sx, (int)sy, r, blink ? 0xFFFFFFu : PLASMA);
           g.DrawPixel((int)sx - r / 2, (int)sy - r / 2, 0xFFFFFF);
         }
-      // 渡り鳥 (いちばん高いところ)
+      // 渡り鳥 (いちばん高いところ)。コーンウォールは白いカモメ
+      uint bc = region == 3 ? 0xF4F4F4u : 0x2A2A2Au;
       if (flock.on)
       {
         float len = sqrtf(flock.vx * flock.vx + flock.vy * flock.vy) + 0.01f, ux = flock.vx / len, uy = flock.vy / len;
@@ -1049,11 +1105,11 @@ namespace SkyLark
           float sx, sy, sc;
           proj(flock.rx - ux * k * 7 - uy * sd * k * 6, flock.ry - uy * k * 7 + ux * sd * k * 6, 32, out sx, out sy, out sc);
           int x = (int)sx, y = (int)sy, wy = ((flock.t + i * 5) / 6) % 4 == 0 ? -2 : ((flock.t + i * 5) / 6) % 4 == 2 ? 1 : 0;
-          g.FillRect(x - 1, y, 3, 2, 0x2A2A2A);
-          g.DrawPixel(x - 2, y + (wy < 0 ? -1 : 0), 0x2A2A2A);
-          g.DrawPixel(x + 2, y + (wy < 0 ? -1 : 0), 0x2A2A2A);
-          g.DrawPixel(x - 3, y + wy, 0x2A2A2A);
-          g.DrawPixel(x + 3, y + wy, 0x2A2A2A);
+          g.FillRect(x - 1, y, 3, 2, bc);
+          g.DrawPixel(x - 2, y + (wy < 0 ? -1 : 0), bc);
+          g.DrawPixel(x + 2, y + (wy < 0 ? -1 : 0), bc);
+          g.DrawPixel(x - 3, y + wy, bc);
+          g.DrawPixel(x + 3, y + wy, bc);
         }
       }
     }
@@ -1137,6 +1193,10 @@ namespace SkyLark
             float h = hash2(frame / 3 + i * 7, i);
             g.FillRect((int)(sx + (h - 0.5f) * 40 * sc / K), (int)(sy - 4 - hash2(i, frame / 3) * 10), 2, 3, h < 0.5f ? 0xFF8A2Au : GOLD);
           }
+        else if (evening && p.type == LIGHTHOUSE)
+          lighthouseBeam(g, (int)sx, (int)(sy - 37 * k));
+        else if (p.type == BEAST && p.kind == 1 && p.t >= 60 && p.t < 130)
+          shuckEyes(g, (int)(sx - 3 * k), (int)(sy - 8 * k), Math.Max(3, (int)(4 * k)));
         else if (p.type == BEAST && p.t >= 60 && p.t < 130)
           for (int s = 0; s < 2; s++)
           {

@@ -8,7 +8,7 @@ namespace SkyLark
   public partial class Game
   {
     const int REGIONS = 5;          // ウィルトシャー、湖水地方、ヨークシャー、コーンウォール、スコットランド高地
-    const int REGIONS_READY = 2;    // できている地方の数 (それまではできている地方をくり返す)
+    const int REGIONS_READY = 5;    // できている地方の数 (それまではできている地方をくり返す)
     const int INTRO_T = 7 * FPS, TRAVEL_T = 6 * FPS;
     const int RABBIT = 17, BOAT = 18; // 野うさぎ (ay = 跳ねている高さ) / 湖のボート (v: 0 = 手こぎ、1 = ヨット)
 
@@ -17,7 +17,7 @@ namespace SkyLark
 
     static readonly string[] REGION_NAME = { "WILTSHIRE", "THE LAKES", "YORKSHIRE", "CORNWALL", "HIGHLANDS" };
     static readonly string[] AREA1_NAME = { "MEADOW VALE", "WINDERMERE", "THE DALES", "THE COAST", "THE GLENS" };
-    static readonly string[] AREA2_NAME = { "HIGH FELLS", "HELVELLYN", "THE MOORS", "BODMIN MOOR", "LOCH NESS" };
+    static readonly string[] AREA2_NAME = { "THE DOWNS", "HELVELLYN", "THE MOORS", "BODMIN MOOR", "LOCH NESS" };
     static readonly string[][] STORY = {
       new[] { "SAUCERS OVER WILTSHIRE!", "THEY ARE AFTER OUR SHEEP.", "UP YOU GO, SKYLARK!" },
       new[] { "THE MOTHERSHIP FLED NORTH", "TO THE MISTY LAKES.", "MIND THE BOATS - AND BOWNESSIE!" },
@@ -49,11 +49,23 @@ namespace SkyLark
     }
     void startTravel()
     {
+      if (region == 4) // 最後の日: 結末の絵はがき
+      {
+        mode = Mode.Ending;
+        modeT = ENDING_T;
+        Sfx(SkyLark.Sfx.Extend);
+        return;
+      }
       mode = Mode.Travel;
       modeT = TRAVEL_T;
       travelFrom = region;
       travelTo = regionOf(day + 1);
       Sfx(SkyLark.Sfx.Discover);
+    }
+    void stepEnding(Input inp)
+    {
+      if (--modeT <= 0 || (modeT < ENDING_T - 60 && (inp.FirePressed || inp.StartPressed)))
+        NextDay();
     }
     void stepTravel(Input inp)
     {
@@ -62,8 +74,8 @@ namespace SkyLark
     }
 
     // ---- 天気: 湖水地方は霧雨 (早めに降りだして長く、弱い)、そのあと虹 ----
-    int rainAt() { return region == 1 ? 30 * FPS : RAIN_AT; }
-    int rainEnd() { return region == 1 ? 64 * FPS : RAIN_END; }
+    int rainAt() { return region == 1 ? 30 * FPS : region == 4 ? 118 * FPS : RAIN_AT; } // 高地は夕方から雪
+    int rainEnd() { return region == 1 ? 64 * FPS : region == 4 ? 160 * FPS : RAIN_END; }
     float rainbowK()
     {
       if (region != 1)
@@ -94,7 +106,7 @@ namespace SkyLark
 
     // ---- 湖水地方のもの ----
     static readonly uint[] HERDWICK = SHEEP_S.Recolor("W=948E82 w=767268 g=5E5A52 k=F2F0E8 e=D8D4CC"); // 灰色の毛に白い顔
-    uint[] sheepPal() { return region == 1 ? HERDWICK : SHEEP_S.Pal; }
+    uint[] sheepPal() { return region == 1 ? HERDWICK : region == 2 ? SWALEDALE : SHEEP_S.Pal; }
 
     static readonly Sprite RABBIT_S = new Sprite(new[] {
       "....e.",
@@ -104,7 +116,7 @@ namespace SkyLark
     }, "b=8A6A48 e=6A4A30 W=F4F2EA k=1A1A1A l=5A3E28", 3, 2);
 
     static readonly uint[] MOOR_LAKES = { 0, 0x86904E, 0x9A7440, 0x8E8E86, 0xBCBCB8 }; // 荒れ地、さび色のシダ、岩、頂
-    uint moorCol(int lv) { return region == 1 ? MOOR_LAKES[lv] : MOOR_C[lv]; }
+    uint moorCol(int lv) { return region == 1 ? MOOR_LAKES[lv] : region == 2 ? MOOR_YORKS[lv] : region == 3 ? MOOR_CORN[lv] : region == 4 ? MOOR_HIGH[lv] : MOOR_C[lv]; }
 
     // ボート (真上から): 手こぎは茶色の舟に漕ぎ手とオール、ヨットは白い舟に帆。うしろに V 字の波
     void drawBoat(Gfx g, Prop p, int x, int y)
@@ -116,7 +128,16 @@ namespace SkyLark
         g.BlendPixel(x - dir * (k + 4), y - k / 2, 0xD8ECF8, a);
         g.BlendPixel(x - dir * (k + 4), y + k / 2, 0xD8ECF8, a);
       }
-      if (p.v == 0)
+      if (p.v == 2) // 漁船: 赤い舟に白い操舵室とマスト
+      {
+        g.FillEllipse(x, y, 8, 3, 0x6A1E14);
+        g.FillEllipse(x, y, 7, 2, 0xB83A2A);
+        g.DrawFastHLine(x - 6, y, 13, 0xF0E8D8);
+        g.FillRect(x - dir * 3 - 2, y - 2, 4, 3, 0xF4F2EA);
+        g.DrawPixel(x + dir * 3, y - 3, 0x5A4030);
+        g.DrawPixel(x + dir * 3, y - 4, 0x5A4030);
+      }
+      else if (p.v == 0)
       {
         g.FillEllipse(x, y, 7, 3, 0x5A3A22);
         g.FillEllipse(x, y, 6, 2, 0x9A6A3E);
@@ -146,9 +167,17 @@ namespace SkyLark
       for (int y = 13; y <= 16; y++) // 舟
       {
         int inset = y - 13;
-        g.DrawFastHLine(3 + inset, y, 17 - inset * 2, p.v == 0 ? (y == 13 ? 0xB07A48u : 0x7A4A28u) : (y == 13 ? 0xFFFFFFu : 0xD8D8D0u));
+        uint hc = p.v == 2 ? (y == 14 ? 0xF0E8D8u : 0xB83A2Au) : p.v == 0 ? (y == 13 ? 0xB07A48u : 0x7A4A28u) : (y == 13 ? 0xFFFFFFu : 0xD8D8D0u);
+        g.DrawFastHLine(3 + inset, y, 17 - inset * 2, hc);
       }
-      if (p.v == 0)
+      if (p.v == 2) // 漁船の操舵室とマスト
+      {
+        g.FillRect(right ? 6 : 11, 8, 6, 5, 0xF4F2EA);
+        g.FillRect(right ? 7 : 12, 9, 4, 2, 0x3A4A5A);
+        g.DrawFastVLine(right ? 15 : 7, 2, 11, 0x5A4030);
+        g.DrawFastHLine(right ? 13 : 5, 4, 5, 0x5A4030);
+      }
+      else if (p.v == 0)
       {
         g.FillRect(10, 9, 3, 4, 0x3A4A6A); // 漕ぎ手
         g.FillCircle(11, 7, 1, 0xE8C8A8);
@@ -258,7 +287,7 @@ namespace SkyLark
 
     void drawBownessie(Gfx g, Prop p, int x, int y)
     {
-      float e = p.lift;
+      float e = p.lift, sc = p.kind == 2 ? 1.45f : 1; // モーガー (海の大蛇) は大きい
       int dir = p.v != 0 ? 1 : -1;
       if (e <= 0.02f)
       {
@@ -268,7 +297,7 @@ namespace SkyLark
               g.BlendPixel(x + i, y + j, 0x1E2A30, 55);
         return;
       }
-      const uint DARK = 0x222A20, BODY = 0x3A4636, RIM = 0x6E7E62;
+      uint DARK = p.kind == 2 ? 0x1A2A2Au : 0x222A20u, BODY = p.kind == 2 ? 0x2A4A4Cu : 0x3A4636u, RIM = p.kind == 2 ? 0x5E9A90u : 0x6E7E62u;
       for (int r = 0; r < 4; r++) // こぶのまわりの波紋
       {
         float cu = r == 3 ? 7 : -17 + r * 8;
@@ -278,30 +307,30 @@ namespace SkyLark
           for (int s = 0; s < 32; s++)
           {
             float a = s * (2 * PI / 32);
-            g.BlendPixel(x + (int)(dir * cu + cosf(a) * rx_), y + 1 + (int)(sinf(a) * ry_), 0xE0F0FA, 110 - w * 40);
+            g.BlendPixel(x + (int)((dir * cu + cosf(a) * rx_) * sc), y + 1 + (int)(sinf(a) * ry_ * sc), 0xE0F0FA, 110 - w * 40);
           }
         }
       }
-      for (int v = 1; v <= 12; v++) // 映り込み
+      for (int v = 1; v <= (int)(12 * sc); v++) // 映り込み
       {
         float wave = sinf(v * 0.9f + frame * 0.25f) * 1.3f;
-        int a = (int)(140 * (1 - v / 13.0f));
-        for (int u = -22; u <= 12; u++)
-          if (bownessieAt(u + wave, v, e))
+        int a = (int)(140 * (1 - v / (13.0f * sc)));
+        for (int u = (int)(-22 * sc); u <= (int)(12 * sc); u++)
+          if (bownessieAt((u + wave) / sc, v / sc, e))
             g.BlendPixel(x + dir * u, y + v, 0x141A12, a);
       }
-      for (int v = 0; v <= 10; v++)
-        for (int u = -22; u <= 12; u++)
+      for (int v = 0; v <= (int)(10 * sc); v++)
+        for (int u = (int)(-22 * sc); u <= (int)(12 * sc); u++)
         {
-          if (!bownessieAt(u, v, e))
+          if (!bownessieAt(u / sc, v / sc, e))
             continue;
           uint c = v <= 1 ? DARK : BODY;
-          if (!bownessieAt(u, v + 1, e) || !bownessieAt(u - 1, v + 1, e))
+          if (!bownessieAt(u / sc, (v + 1) / sc, e) || !bownessieAt((u - 1) / sc, (v + 1) / sc, e))
             c = RIM;
           g.DrawPixel(x + dir * u, y - v, c);
         }
       if (e > 0.85f)
-        g.DrawPixel(x + dir * 9, y - (int)(7 * e), 0xD8E0B0);
+        g.DrawPixel(x + dir * (int)(9 * sc), y - (int)(7 * e * sc), 0xD8E0B0);
     }
 
     // ---- 絵はがき (日の始まり) ----
@@ -309,7 +338,7 @@ namespace SkyLark
     {
       int y0 = 92;
       postcard(g, y0, 340);
-      txt(g, SW / 2, y0 + 18, GOLD, "DAY " + day, Datum.TC, 2);
+      txt(g, SW / 2, y0 + 18, GOLD, "DAY " + day + (day > REGIONS ? "  ROUND " + ((day - 1) / REGIONS + 1) : ""), Datum.TC, 2);
       txt(g, SW / 2, y0 + 40, POPPY, REGION_NAME[region], Datum.TC, 3);
       regionScene(g, region, 26, y0 + 76, SW - 52, 112);
       string[] lines = STORY[region];
@@ -323,6 +352,12 @@ namespace SkyLark
     {
       if (reg == 1)
         lakesScene(g, x0, y0, w, h);
+      else if (reg == 2)
+        yorkshireScene(g, x0, y0, w, h);
+      else if (reg == 3)
+        cornwallScene(g, x0, y0, w, h);
+      else if (reg == 4)
+        highlandsScene(g, x0, y0, w, h);
       else
         drawPostcardScene(g, x0, y0, w, h);
     }
