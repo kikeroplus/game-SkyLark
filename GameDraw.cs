@@ -596,6 +596,12 @@ namespace SkyLark
         case ROCK:
           g.FillEllipse(x + 2, y + 2, 5, 3, 0);
           break;
+        case TANK:
+          g.FillRect(x - 6, y - 3, 16, 11, 0);
+          break;
+        case AAGUN:
+          g.FillEllipse(x + 2, y + 2, 7, 5, 0);
+          break;
       }
     }
 
@@ -617,6 +623,12 @@ namespace SkyLark
           break;
         case WRECK:
           drawWreck(g, x, y);
+          break;
+        case TANK:
+          drawTank(g, p, x, y);
+          break;
+        case AAGUN:
+          drawAAGun(g, p, x, y);
           break;
         case SHEEP:
         case COW:
@@ -1445,6 +1457,12 @@ namespace SkyLark
         drawRising(g, u, x, y, R);
         return;
       }
+      if (u.type >= CARRIER)
+      {
+        drawBeam(g, u, x, y);
+        drawUfoArms(g, u, x, y, R);
+        return;
+      }
       drawSaucer(g, x, y, R, u.flash > 0, (int)(u.a * 3) + u.type);
     }
 
@@ -1857,7 +1875,7 @@ namespace SkyLark
       g.ClearClipRect();
       drawPostcardScene(g, 26, y0 + 74, SW - 52, 84);
       int ty = y0 + 172;
-      g.Text(SW / 2, ty, DEEP, "ARROWS : MOVE    Z : SHOT", Datum.TC);
+      g.Text(SW / 2, ty, DEEP, "ARROWS : MOVE   Z : SHOT   X : BOMB", Datum.TC);
       g.Text(SW / 2, ty + 14, BROWN, "SHIFT : SLOW    ESC : PAUSE", Datum.TC);
       g.Text(SW / 2, ty + 28, BROWN, "F11 : FULL   F2 : VIEW   M : SOUND", Datum.TC);
       g.Text(SW / 2, ty + 50, BROWN, "(C) 2026", Datum.TC);
@@ -2274,6 +2292,7 @@ namespace SkyLark
           g.DrawPixel(x, y + 6, GOLD);
           g.BlendPixel(x, y + 7, GOLD, 120);
         }
+      drawArmsClassic(g);
       if (planeOn && !(invT > 0 && (frame / 3) % 2 != 0))
       {
         int x = S(rpx), y = S(rpy);
@@ -2287,12 +2306,7 @@ namespace SkyLark
       foreach (Shot s in theirs) // 円盤の弾: 濃い縁どりにピンクと白の芯、左上に照り
         if (s.on)
         {
-          int x = S(s.rx), y = S(s.ry);
-          bool blink = (frame / 2) % 2 != 0;
-          g.FillCircle(x, y, 4, PLASMA_D);
-          g.FillCircle(x, y, 3, blink ? 0xFFFFFFu : PLASMA);
-          g.FillCircle(x, y, 1, blink ? PLASMA : 0xFFFFFFu);
-          g.DrawPixel(x - 2, y - 2, 0xFFFFFF);
+          drawEnemyShot(g, s, S(s.rx), S(s.ry), 1);
         }
       fx.Draw(g, CROPS[0].b);
       tint(g);

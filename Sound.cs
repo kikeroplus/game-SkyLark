@@ -37,6 +37,10 @@ namespace SkyLark
     Splash,
     Emerge,
     Growl,
+    Bomb,
+    Flak,
+    BeamFire,
+    TankDrop,
     Count
   }
 
@@ -610,6 +614,47 @@ namespace SkyLark
         w[i] = (float)((saw * 0.5 + glp * 3.5) * trem * env);
       }
       Set(Sfx.Growl, w, 0.45f);
+      // 爆弾を落とす: ヒューと下がっていく口笛のような音
+      w = New(0.8);
+      double bph2 = 0;
+      for (int i = 0; i < w.Length; i++)
+      {
+        double t = (double)i / SR;
+        bph2 += (1500 - 900 * t) / SR;
+        w[i] = (float)(Math.Sin(bph2 * 2 * Math.PI) * Math.Min(1, t / 0.05) * Math.Min(1, (0.8 - t) / 0.2) * 0.5);
+      }
+      Set(Sfx.Bomb, w, 0.16f);
+      // 高射砲: ぽん、と軽くこもった音
+      w = New(0.18);
+      float flp = 0;
+      for (int i = 0; i < w.Length; i++)
+      {
+        double t = (double)i / SR;
+        flp += (Noise() - flp) * 0.15f;
+        w[i] = (float)((flp * 2.5 + Math.Sin(t * 2 * Math.PI * (160 - 300 * t)) * 0.6) * Math.Exp(-t * 30));
+      }
+      Set(Sfx.Flak, w, 0.22f);
+      // 光線円盤が撃つ: ビーッと震える高い音
+      w = New(1.1);
+      double zph = 0;
+      for (int i = 0; i < w.Length; i++)
+      {
+        double t = (double)i / SR;
+        zph += (880 + 60 * Math.Sin(t * 2 * Math.PI * 30)) / SR;
+        double fr = zph - Math.Floor(zph);
+        w[i] = (float)(((fr < 0.5 ? 1 : -1) * 0.4 + Math.Sin(zph * 2 * Math.PI * 1.5) * 0.4) * Math.Min(1, t / 0.02) * Math.Min(1, (1.1 - t) / 0.3));
+      }
+      Set(Sfx.BeamFire, w, 0.13f);
+      // 戦車が着地: どすん
+      w = New(0.4);
+      float dlp = 0;
+      for (int i = 0; i < w.Length; i++)
+      {
+        double t = (double)i / SR;
+        dlp += (Noise() - dlp) * 0.05f;
+        w[i] = (float)((Math.Sin(t * 2 * Math.PI * (70 - 60 * t)) * 0.8 + dlp * 4) * Math.Exp(-t * 10));
+      }
+      Set(Sfx.TankDrop, w, 0.4f);
     }
 
     // 連れ去られる鳴き声: 震えるメエ (モー) の声が、高さを下げながら遠ざかる (だんだん小さく、こもり、こだまが残る)

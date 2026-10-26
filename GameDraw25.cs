@@ -151,6 +151,7 @@ namespace SkyLark
       items.Sort((ia, ib) => ia.Key.CompareTo(ib.Key));
       foreach (var it in items)
         it.Value();
+      drawArms25(g);
       drawAir25(g);
       fx.Draw25(g, CROPS[0].b);
       tint(g);
@@ -491,6 +492,34 @@ namespace SkyLark
           cv.DrawPixel(5, 5, 0x9A7A38);
           cv.DrawPixel(3, 2, 0xF4DC90);
           cutBlit(g, 11, 10, 5, 9, wx, wy, 0, PAPER_K, true);
+          break;
+        case TANK:
+          {
+            float alt = p.lift * 26;
+            if (p.lift > 0) // 戦車運びの光線の中を下りてくる
+            {
+              float tx, ty, tsc, bx, by, bsc;
+              proj(wx, wy, 0, out tx, out ty, out tsc);
+              proj(wx, wy, AIR, out bx, out by, out bsc);
+              for (int yy = (int)by; yy <= (int)ty; yy++)
+                for (int i = -7; i <= 7; i++)
+                  g.BlendPixel((int)tx + i, yy, 0xE0C8FF, 70 - Math.Abs(i) * 8);
+            }
+            cutBegin(25, 15);
+            tankSide(cv, p);
+            cutBlit(g, 25, 15, 12, 14, wx, wy, alt, PAPER_K, p.lift <= 0);
+            break;
+          }
+        case AAGUN:
+          cutBegin(19, 15);
+          aaSide(cv, p);
+          cutBlit(g, 19, 15, 9, 14, wx, wy, 0, PAPER_K, true);
+          if (p.vy > 0 && p.kind == 0)
+          {
+            float sx, sy, sc;
+            proj(wx + cosf(p.ax) * 6, wy, 12, out sx, out sy, out sc);
+            glow(g, (int)sx - 1, (int)sy - 1, 0xFFF0A0, 2);
+          }
           break;
         case ROCK:
           cutBegin(14, 9);
@@ -845,7 +874,7 @@ namespace SkyLark
       cy = (int)(R * 0.66f) + 4;
     }
 
-    void saucerSide(Gfx g, int x, int y, float R, bool flash, int phase, float burn)
+    void saucerSide(Gfx g, int x, int y, float R, bool flash, int phase, float burn, uint topC = 0xC8CCD6, uint domeC = 0x2A8A9A)
     {
       Func<uint, uint> fin = c =>
       {
@@ -890,7 +919,7 @@ namespace SkyLark
           float e = i * i / (trx * trx) + j * j / (tryy * tryy);
           if (e > 1)
             continue;
-          uint c = litc(0xC8CCD6, 0.55f - j / tryy * 0.35f - i / trx * 0.35f);
+          uint c = litc(topC, 0.55f - j / tryy * 0.35f - i / trx * 0.35f);
           if (e > 0.42f && e < 0.52f) c = 0x8A8E9A;
           if (e > 0.93f) c = 0x9A9EAA;
           g.DrawPixel(x + i, (int)ty + j, fin(c));
@@ -903,7 +932,7 @@ namespace SkyLark
           float e = i * i / (dr * dr) + j * j / (dr * dr * 1.2f);
           if (e > 1)
             continue;
-          uint c = burn > 0.3f ? mix(0x2E4A50, 0x1A1A1A, burn) : mix(0x2A8A9A, 0xC8F8FC, 0.35f + (-i * 0.5f - j * 0.8f) / dr * 0.5f);
+          uint c = burn > 0.3f ? mix(0x2E4A50, 0x1A1A1A, burn) : mix(domeC, mix(domeC, 0xFFFFFF, 0.8f), 0.35f + (-i * 0.5f - j * 0.8f) / dr * 0.5f);
           if (e > 0.88f) c = mulc(c, 0.7f);
           g.DrawPixel(x + i, (int)dcy + j, fin(c));
         }
@@ -1087,12 +1116,8 @@ namespace SkyLark
         if (s.on)
         {
           float sx, sy, sc;
-          proj(s.rx, s.ry, AIR, out sx, out sy, out sc);
-          int r = Math.Max(2, (int)(3.5f * sc / K));
-          bool blink = (frame / 2) % 2 != 0;
-          g.FillCircle((int)sx, (int)sy, r + 1, PLASMA_D);
-          g.FillCircle((int)sx, (int)sy, r, blink ? 0xFFFFFFu : PLASMA);
-          g.DrawPixel((int)sx - r / 2, (int)sy - r / 2, 0xFFFFFF);
+          proj(s.rx, s.ry, s.kind == 4 ? 2 : AIR, out sx, out sy, out sc);
+          drawEnemyShot(g, s, (int)sx, (int)sy, sc / K);
         }
       // 渡り鳥 (いちばん高いところ)。コーンウォールは白いカモメ
       uint bc = region == 3 ? 0xF4F4F4u : 0x2A2A2Au;
@@ -1134,6 +1159,11 @@ namespace SkyLark
             g.BlendPixel(xx, yy, BEAM, Math.Min(200, (int)(e * 120) + (((yy + frame) / 2) % 3 == 0 ? 40 : 0)));
           }
         }
+      }
+      if (u.type >= CARRIER)
+      {
+        paperUfoArms(g, u, R, alt);
+        return;
       }
       int w, h, cy;
       saucerBox(R, out w, out h, out cy);

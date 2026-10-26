@@ -110,7 +110,7 @@ namespace SkyLark
     readonly Sound snd;
     readonly bool[] keys = new bool[256];
     // 押した瞬間 (次のフレームまで覚えておく。短く叩いても取りこぼさない)
-    bool fireHit, startHit, pauseHit, quitHit, backHit, upHit, downHit, leftHit, rightHit;
+    bool fireHit, startHit, pauseHit, quitHit, backHit, bombHit, upHit, downHit, leftHit, rightHit;
     char typed;
     ushort padPrev;
     bool fullscreen;
@@ -298,8 +298,8 @@ namespace SkyLark
         case Keys.Q:
           quitHit = true;
           break;
-        case Keys.X:
-          backHit = true;
+        case Keys.X: // 遊んでいるあいだは爆弾、メニューでは戻る
+          backHit = bombHit = true;
           break;
         case Keys.Back:
           backHit = true;
@@ -390,12 +390,14 @@ namespace SkyLark
       inp.PausePressed = pauseHit;
       inp.QuitPressed = quitHit;
       inp.BackPressed = backHit;
+      inp.BombPressed = bombHit;
+      inp.Bomb = Key(Keys.X);
       inp.UpPressed = upHit;
       inp.DownPressed = downHit;
       inp.LeftPressed = leftHit;
       inp.RightPressed = rightHit;
       inp.Typed = typed;
-      fireHit = startHit = pauseHit = quitHit = backHit = upHit = downHit = leftHit = rightHit = false;
+      fireHit = startHit = pauseHit = quitHit = backHit = bombHit = upHit = downHit = leftHit = rightHit = false;
       typed = '\0';
 
       Pad.State s;
@@ -421,6 +423,8 @@ namespace SkyLark
         inp.PausePressed |= (hit & Pad.START) != 0;
         inp.QuitPressed |= (hit & Pad.BACK) != 0;
         inp.BackPressed |= (hit & Pad.B) != 0;
+        inp.BombPressed |= (hit & Pad.B) != 0;
+        inp.Bomb |= (b & Pad.B) != 0;
         inp.UpPressed |= (hit & Pad.UP) != 0;
         inp.DownPressed |= (hit & Pad.DOWN) != 0;
         inp.LeftPressed |= (hit & Pad.LEFT) != 0;
@@ -709,6 +713,9 @@ namespace SkyLark
       if (seed != null && seed.Length > 0)
         g.Reseed(uint.Parse(seed));
       g.View25 = Environment.GetEnvironmentVariable("SKYLARK_VIEW") == "25"; // 2.5D の絵で書き出す
+      string wave = Environment.GetEnvironmentVariable("SKYLARK_WAVE");
+      if (wave != null && wave.Length > 0)
+        g.ForceWave = int.Parse(wave);
       Gfx gfx = new Gfx(Game.SW, Game.SH);
       if (args[0] == "--snap-play") // 0 点でもネームエントリーまで行くように
         for (int i = 0; i < 5; i++)
@@ -726,6 +733,7 @@ namespace SkyLark
           inp.Fire = true;
           inp.Left = (f / 60) % 2 == 0;
           inp.Right = !inp.Left;
+          inp.BombPressed = f % 45 == 0;
         }
         Game.Mode before = g.mode;
         g.Step(inp);

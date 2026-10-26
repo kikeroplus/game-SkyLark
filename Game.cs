@@ -13,9 +13,9 @@ namespace SkyLark
   // 1 フレームぶんの操作。Program がキーボードとゲームパッドからまとめる
   public class Input
   {
-    public bool Left, Right, Up, Down, Fire, Slow;
+    public bool Left, Right, Up, Down, Fire, Slow, Bomb;
     public float AX, AY; // アナログスティック (-1〜1。使っていなければ 0)
-    public bool FirePressed, StartPressed, PausePressed, QuitPressed, BackPressed;
+    public bool FirePressed, StartPressed, PausePressed, QuitPressed, BackPressed, BombPressed;
     public bool UpPressed, DownPressed, LeftPressed, RightPressed;
     public char Typed; // ネームエントリーで打った文字 (なければ 0)
   }
@@ -147,9 +147,9 @@ namespace SkyLark
     }
 
     const int SCOUT = 0, TRIO = 1, ABDUCTOR = 2; // 小型 / 3 機で輪になって回る / 羊や牛を光線でさらう
-    static readonly int[] UFO_HP = { 2, 2, 6 };
-    static readonly int[] UFO_PTS = { 200, 300, 1500 };
-    static readonly int[] UFO_R = { 6, 6, 9 };
+    static readonly int[] UFO_HP = { 2, 2, 6, 12, 2, 4, 1, 5 }; // 3 以降は GameArms.cs の円盤
+    static readonly int[] UFO_PTS = { 200, 300, 1500, 2000, 250, 400, 100, 800 };
+    static readonly int[] UFO_R = { 6, 6, 9, 13, 5, 8, 4, 8 };
     class Ufo : Body
     {
       public float vx, vy, home, a; // TRIO: vx = 輪の中心の x、home = 輪が止まる高さ、a = 輪の中の角度
@@ -161,6 +161,8 @@ namespace SkyLark
     class Shot : Body
     {
       public float vx, vy;
+      public int kind, life; // 弾の種類 (GameArms.cs)、飛んだフレーム数
+      public float w, tx, ty; // 曲がる弾の回る速さ / 地上の砲弾と高射砲の弾の行き先
       public bool on;
     }
     class Cloud : Body
@@ -393,7 +395,7 @@ namespace SkyLark
     float lochC, lochR;
 
     Prop[] props = New<Prop>(160);
-    Ufo[] ufos = New<Ufo>(18);
+    Ufo[] ufos = New<Ufo>(28);
     Shot[] mine = New<Shot>(80), theirs = New<Shot>(110);
     Cloud[] clouds = New<Cloud>(5); // 晴れは 3 つ、雨のときは 5 つ
     Flock flock = new Flock();
@@ -778,6 +780,19 @@ namespace SkyLark
           }
         }
       }
+      if (frand(0, 1) < 0.03f) // 村人の高射砲 (土のうの陣地か、大砲を積んだトラクター)
+      {
+        int c = irand(2, COLS - 3);
+        if (map[0][c].type == FIELD || map[0][c].type == PLAIN)
+        {
+          Prop aa = addProp(c * T + 4, y, AAGUN, map[0][c].type == FIELD && map[0][c].v == WHEAT ? 1 : irand(0, 1));
+          if (aa != null)
+          {
+            aa.ax = -PI / 2;
+            aa.t = irand(20, 60);
+          }
+        }
+      }
       placeLandmarks(y);
       regionProps(y);
       for (int c = 0; c < COLS; c++) // 草原にも羊
@@ -862,6 +877,8 @@ namespace SkyLark
           s.y = s.oy = y;
           s.vx = vx * k;
           s.vy = vy * k;
+          s.kind = 0;
+          s.life = 0;
           s.on = true;
           enemyShotSnd = true;
           return;
@@ -922,10 +939,15 @@ namespace SkyLark
 
     void spawnWave()
     {
-      int kind = irand(0, 3);
-      if (kind == 3 && spawnAbductor())
+      int kind = pickWave();
+      if (kind >= 3)
+      {
+        spawnArms(kind);
         return;
-      if (kind == 2 || kind == 3)
+      }
+      if (kind == 2 && spawnAbductor())
+        return;
+      if (kind == 1 || kind == 2)
       {
         // 3 機の輪
         float cx = frand(50, W - 50), home = frand(70, 140);
@@ -974,6 +996,7 @@ namespace SkyLark
         }
         return;
       }
+      if (!stepUfoArms(u))
       switch (u.type)
       {
         case SCOUT:
@@ -1052,6 +1075,7 @@ namespace SkyLark
       }
       u.on = false;
       score += UFO_PTS[u.type];
+      onUfoDestroyed(u);
       Sfx(SkyLark.Sfx.Boom, u.type == ABDUCTOR ? 1 : 0.7f);
       fx.Burst(u.x, u.y, SILVER_L, 12, 1.6f, 18);
       fx.Burst(u.x, u.y, RIM[irand(0, 3)], 6, 1.0f, 14);
@@ -1243,6 +1267,9 @@ namespace SkyLark
         float a = portAngle((u / 14) % 4);
         aimed(mom.x + cosf(a) * 22, mom.y + sinf(a) * 22, 2.0f);
       }
+      if (angry && u >= 180 && u < 240 && u % 20 == 0) // 怒ると、左右へ曲がる弾も混ぜる
+        for (int sd = -1; sd <= 1; sd += 2)
+          shootAtK(mom.x + sd * 26, mom.y + 6, angTo(mom.x + sd * 26, mom.y + 6) - sd * 0.6f, 1.3f, 1, sd * 0.016f);
       if (u == 220 || u == 260) // ハッチから偵察機を出す
         for (int sd = -1; sd <= 1; sd += 2)
         {
@@ -1370,6 +1397,8 @@ namespace SkyLark
           {
             if (!u.on || u.t < 0 || cost + danger >= best)
               continue;
+            if (u.type == LANCER && (u.state == 2 || (u.state == 1 && u.a > 20)) && fabsf(cx - u.x) < 9 && cy > u.y) // 光線の下は避ける
+              danger += u.state == 2 ? 40 : 25;
             float vy = u.type == SCOUT ? u.vy : u.type == ABDUCTOR ? (u.state == 2 ? u.vy : SPEED) : 0;
             for (int t = 0; t <= 30; t += 10)
             {
@@ -1417,7 +1446,7 @@ namespace SkyLark
         tapT = irand(4, 7);
     }
 
-    // 人の操作: 十字で動かし (Shift / X でゆっくり)、Z を押しているあいだ撃ちつづける。押した瞬間はすぐ撃つ
+    // 人の操作: 十字で動かし (Shift でゆっくり)、Z を押しているあいだ撃ちつづける。押した瞬間はすぐ撃つ。X で爆弾
     void control(Input inp)
     {
       float mx = (inp.Right ? 1 : 0) - (inp.Left ? 1 : 0), my = (inp.Down ? 1 : 0) - (inp.Up ? 1 : 0);
@@ -1444,6 +1473,8 @@ namespace SkyLark
         volley();
         fireCd = 4;
       }
+      if (inp.BombPressed)
+        dropBomb();
     }
 
     // ---- 遊びの切り替え ----
@@ -1471,6 +1502,11 @@ namespace SkyLark
         s.on = false;
       foreach (Shot s in theirs)
         s.on = false;
+      foreach (Shot s in flak)
+        s.on = false;
+      foreach (Bomb b in bombs)
+        b.on = false;
+      bombCd = 0;
       foreach (Pop q in pops)
         q.on = false;
       for (int i = 0; i < clouds.Length; i++)
@@ -1632,6 +1668,8 @@ namespace SkyLark
     // 確かめる用: いま画面にいる牧羊犬・カモ・パブ・洗濯物・跳ねている羊の数
     public string Census()
     {
+      if (Environment.GetEnvironmentVariable("SKYLARK_ARMS") != null)
+        return armsCensus();
       int dog = 0, duck = 0, pub = 0, laundry = 0, hop = 0, beam = 0, stone = 0, nessie = 0, beast = 0, crop = 0;
       foreach (Prop p in props)
         if (p.on && p.y > 10 && p.y < H - 10)
@@ -1982,6 +2020,10 @@ namespace SkyLark
         }
         else if ((p.type == SHEEP || p.type == COW) && !p.held) // のんびり歩く
           p.x += 0.06f * sinf((frame + p.v * 97 + (int)p.y * 13) * 0.01f);
+        if (p.type == TANK)
+          stepTank(p);
+        else if (p.type == AAGUN)
+          stepAAGun(p);
         if (p.type == DOG) // 群れのまわりを 8 の字に走りまわる
         {
           p.ay += SPEED;
@@ -2280,17 +2322,23 @@ namespace SkyLark
       foreach (Shot s in theirs)
         if (s.on)
         {
-          s.x += s.vx;
-          s.y += s.vy;
-          if (s.y > H + 4 || s.y < -4 || s.x < -4 || s.x > W + 4)
+          if (!stepEnemyShot(s))
             s.on = false;
-          else if (alive && invT == 0 && fabsf(s.x - px) < 3 && fabsf(s.y - py) < 4)
+          else if (s.kind != 4 && alive && invT == 0 && fabsf(s.x - px) < shotHitX(s.kind) && fabsf(s.y - py) < shotHitY(s.kind))
           {
             s.on = false;
             killPlayer();
             alive = false;
           }
         }
+      foreach (Ufo u in ufos) // 光線円盤の光線
+        if (alive && invT == 0 && beamHits(u))
+        {
+          killPlayer();
+          alive = false;
+        }
+      stepFlak();
+      stepBombs();
       foreach (Shot s in mine)
       {
         if (!s.on)
@@ -2381,6 +2429,7 @@ namespace SkyLark
       {
         think();
         trigger();
+        autoBomb();
       }
       else
         control(inp);
