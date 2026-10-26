@@ -1,0 +1,4 @@
+# build.bat で作る実行ファイル
+SkyLark.exe
+# 2.5D を足す前の控え (git の履歴があるので登録しない)
+backup-before-25d/
