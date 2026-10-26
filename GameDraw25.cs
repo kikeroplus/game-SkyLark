@@ -29,7 +29,7 @@ namespace SkyLark
 
     Gfx gl;                             // 真上から見た地面 (A の絵)
     Gfx cv;                             // 張りぼてを 1 枚ずつ描く台紙
-    readonly int[] rowGy = new int[SH];
+    readonly int[] rowGy = new int[SH], rowGyF = new int[SH];
     readonly float[] rowA = new float[SH], rowB = new float[SH];
     readonly int[] rowFog = new int[SH];
     bool rowsReady;
@@ -58,12 +58,33 @@ namespace SkyLark
         float wy = YB - (PF / sc - PD), u = uOf(wy);
         if (wy < YT - 0.5f)
           continue;
-        rowGy[sy] = constrain((int)(wy * K) + GL_TOP, 0, SH + GL_TOP - 1);
+        float gyf = constrain(wy * K + GL_TOP - 0.5f, 0, SH + GL_TOP - 2);
+        rowGy[sy] = (int)gyf;
+        rowGyF[sy] = (int)((gyf - (int)gyf) * 256);
         rowA[sy] = K / sc;
         rowB[sy] = K * W / 2f - SW / 2f * K / sc;
         rowFog[sy] = (int)(constrain((u - 0.62f) / 0.38f, 0, 1) * 110);
       }
       rowsReady = true;
+    }
+
+    static int mirrorX(int x)
+    {
+      if (x < 0)
+        x = -x - 1;
+      else if (x >= SW)
+        x = 2 * SW - 1 - x;
+      return x < 0 ? 0 : x >= SW ? SW - 1 : x;
+    }
+
+    // 4 つの点を、横 fx・縦 fy (0〜255) の割合で混ぜる
+    static int bilerp(int c00, int c10, int c01, int c11, int fx, int fy)
+    {
+      int ifx = 256 - fx, ify = 256 - fy;
+      int r = ((((c00 >> 16) & 255) * ifx + ((c10 >> 16) & 255) * fx) * ify + (((c01 >> 16) & 255) * ifx + ((c11 >> 16) & 255) * fx) * fy) >> 16;
+      int g = ((((c00 >> 8) & 255) * ifx + ((c10 >> 8) & 255) * fx) * ify + (((c01 >> 8) & 255) * ifx + ((c11 >> 8) & 255) * fx) * fy) >> 16;
+      int b = (((c00 & 255) * ifx + (c10 & 255) * fx) * ify + ((c01 & 255) * ifx + (c11 & 255) * fx) * fy) >> 16;
+      return (r << 16) | (g << 8) | b;
     }
 
     static int blendI(int c, int t, int a)
@@ -89,30 +110,22 @@ namespace SkyLark
       g.UseMask();
       drawGroundLayer25(gl);
       drawSky25(g);
-      // 地面を奥へ傾けて映す。左右にはみ出たところは鏡に映して、少しかすませる。遠くはもやに溶ける
+      // 地面を奥へ傾けて映す。となりあう 4 つの点を混ぜて、ギザギザを目立たなくする。
+      // 左右にはみ出たところは鏡に映して、少しかすませる。遠くはもやに溶ける
       int[] src = gl.Buf, dst = g.Buf;
       for (int sy = 0; sy < SH; sy++)
       {
         int gy = rowGy[sy];
         if (gy < 0)
           continue;
-        int off = gy * SW, fog = rowFog[sy], o = sy * SW;
-        float a = rowA[sy], b = rowB[sy];
+        int off0 = gy * SW, off1 = off0 + SW, fy = rowGyF[sy], fog = rowFog[sy], o = sy * SW;
+        float a = rowA[sy], b = rowB[sy] - 0.5f;
         for (int sx = 0; sx < SW; sx++)
         {
-          int gx = (int)(b + sx * a);
-          bool mirror = false;
-          if (gx < 0)
-          {
-            gx = Math.Min(SW - 1, -gx - 1);
-            mirror = true;
-          }
-          else if (gx >= SW)
-          {
-            gx = Math.Max(0, 2 * SW - 1 - gx);
-            mirror = true;
-          }
-          int c = src[off + gx];
+          int fx8 = (int)Math.Floor((b + sx * a) * 256), gx = fx8 >> 8, fxx = fx8 & 255;
+          bool mirror = gx < 0 || gx >= SW - 1;
+          int gx0 = mirrorX(gx), gx1 = mirrorX(gx + 1);
+          int c = bilerp(src[off0 + gx0], src[off0 + gx1], src[off1 + gx0], src[off1 + gx1], fxx, fy);
           if (mirror)
             c = blendI(c, (int)FOG_C, 45);
           if (fog > 0)
@@ -142,6 +155,7 @@ namespace SkyLark
       fx.Draw25(g, CROPS[0].b);
       tint(g);
       drawLights25(g);
+      drawRainbow(g, SW / 2, HZ + 260, 300);
       float rk = rainK();
       if (rk > 0) // 雨粒 (画面に直接)
         for (int i = 0, n = (int)(drops.Length * rk); i < n; i++)
@@ -183,7 +197,16 @@ namespace SkyLark
                   g.BlendPixel(S(gx) + i, S(gy) + j, 0xF8FFD0, 150 - (i * i + j * j) * 8);
         }
         else if (p.type == STONEHENGE)
-          hengeGround25(g, x, y);
+          if (p.kind == 1)
+            for (int j = -50; j <= 50; j++) // キャッスルリッグ: 踏まれて薄くなった芝の輪
+              for (int i = -50; i <= 50; i++)
+              {
+                float q = sqrtf(i * i + j * j);
+                if (q > 40 && q < 50)
+                  g.BlendPixel(x + i, y + j, 0xD8E8B0, 60);
+              }
+          else
+            hengeGround25(g, x, y);
         else if (p.type == DEBRIS || p.type == WRECK)
           drawProp(g, p, 0);
       }
@@ -194,12 +217,12 @@ namespace SkyLark
       foreach (Prop p in props)
         if (p.on && visible(S(p.ry) - 60, S(p.ry) + 60) && p.type != STONEHENGE)
           propShadow(g, p);
-      foreach (Prop p in props) // ストーンヘンジの石の影 (斜めに伸ばす)
+      foreach (Prop p in props) // ストーンヘンジ (キャッスルリッグ) の石の影 (斜めに伸ばす)
         if (p.on && p.type == STONEHENGE)
-          for (int k = 0; k < 16; k++)
+          for (int k = 0, n = p.kind == 1 ? 36 : 16; k < n; k++)
           {
-            float a = k * (2 * PI / 16) + 0.1f;
-            int bx = S(p.rx) + (int)(cosf(a) * 38), by = S(p.ry) + (int)(sinf(a) * 38);
+            float a = k * (2 * PI / n) + 0.1f, rr = p.kind == 1 ? 34 : 38;
+            int bx = S(p.rx) + (int)(cosf(a) * rr), by = S(p.ry) + (int)(sinf(a) * rr);
             g.FillTriangle(bx - 3, by, bx + 3, by, bx + 14, by + 8, 0);
             g.FillTriangle(bx - 3, by, bx + 14, by + 8, bx + 8, by + 8, 0);
           }
@@ -381,7 +404,7 @@ namespace SkyLark
             float alt = p.lift * 20 + (p.hop > 0 ? Math.Abs(sinf(p.hop * 0.42f)) * 4 : 0);
             bool flip = p.v == 0;
             if (p.type == SHEEP)
-              cutSprite(g, SHEEP_S, flip, null, wx, wy, alt, PAPER_K, true);
+              cutSprite(g, SHEEP_S, flip, region == 1 ? HERDWICK : null, wx, wy, alt, PAPER_K, true);
             else
             {
               int v = idx % 3;
@@ -397,6 +420,14 @@ namespace SkyLark
           }
         case DOG:
           cutSprite(g, (frame / 3) % 2 != 0 ? DOG_A : DOG_B, p.v == 0, null, wx, wy, 0, PAPER_K, true);
+          break;
+        case RABBIT:
+          cutSprite(g, RABBIT_S, p.v == 0, null, wx, wy, p.ay, PAPER_K, true);
+          break;
+        case BOAT:
+          cutBegin(23, 18);
+          boatSide(cv, p);
+          cutBlit(g, 23, 18, 11, 16, wx, wy, 0, PAPER_K, true);
           break;
         case DUCK:
           cutSprite(g, p.v == 0 ? DUCK_S : DUCKLING, p.vx < 0, null, wx, wy, 0, PAPER_K, true);
@@ -460,9 +491,18 @@ namespace SkyLark
           break;
         case STONEHENGE:
           {
-            cutBegin(130, 78);
-            drawHengeStones(cv, 54, 50);
-            cutBlit(g, 130, 78, 54, 50, wx, wy, 0, 1.0f, true);
+            if (p.kind == 1) // キャッスルリッグ
+            {
+              cutBegin(90, 46);
+              castleStones(cv, 45, 30, false);
+              cutBlit(g, 90, 46, 45, 30, wx, wy, 0, 1.1f, true);
+            }
+            else
+            {
+              cutBegin(130, 78);
+              drawHengeStones(cv, 54, 50);
+              cutBlit(g, 130, 78, 54, 50, wx, wy, 0, 1.0f, true);
+            }
             int ph2 = p.t % 80; // 円盤が湧いてくるとき、真ん中が緑に光る
             float glowK = p.spawned < 6 && ph2 >= 18 && ph2 <= 70 ? 1 - Math.Abs(ph2 - 40) / 30.0f : 0;
             if (glowK > 0)
@@ -484,7 +524,10 @@ namespace SkyLark
             if (p.lift <= 0.02f)
               break;
             cutBegin(42, 36);
-            drawNessie(cv, p, 21, 33);
+            if (p.kind == 1)
+              drawBownessie(cv, p, 21, 33);
+            else
+              drawNessie(cv, p, 21, 33);
             cutBlit(g, 42, 36, 21, 33, wx, wy, 0, PAPER_K, false);
             float sx, sy, sc;
             proj(wx, wy, 0, out sx, out sy, out sc);
@@ -698,6 +741,46 @@ namespace SkyLark
     }
 
     // ---- 飛ぶもの ----
+    // 自機をうしろの少し上から: 横に広がる楕円の主翼 (迷彩と白に赤の点の印)、短く見える胴と風防、
+    // 手前の水平尾翼と立った垂直尾翼、先頭に黒い機首。台紙の (19, 14) が機体の真ん中。プロペラは画面に直接描く
+    void planeBack(Gfx g)
+    {
+      for (int j = -4; j <= 4; j++) // 主翼
+        for (int i = -17; i <= 17; i++)
+        {
+          float e = i * i / 289f + j * j / 11f;
+          if (e > 1)
+            continue;
+          uint c = j < -1 ? 0x8A9058u : j > 1 ? 0x565C34u : 0x6E7444u;
+          g.DrawPixel(19 + i, 14 + j, c);
+        }
+      g.FillEllipse(11, 14, 3, 1, 0x6A5434); // 迷彩
+      g.FillEllipse(26, 13, 3, 1, 0x6A5434);
+      for (int s = -1; s <= 1; s += 2) // 印
+      {
+        g.FillEllipse(19 + s * 10, 14, 2, 1, 0xF0F0F0);
+        g.DrawPixel(19 + s * 10, 14, POPPY);
+      }
+      for (int j = -8; j <= 8; j++) // 胴
+        for (int i = -3; i <= 3; i++)
+        {
+          if (i * i / 9f + j * j / 64f > 1)
+            continue;
+          g.DrawPixel(19 + i, 14 + j, i < 0 ? 0xA4A472u : i == 0 ? 0x8A8A58u : 0x6E6E44u);
+        }
+      g.FillEllipse(19, 11, 2, 2, 0x2A3A4A); // 風防
+      g.DrawPixel(18, 10, 0xA8D0E8);
+      g.FillEllipse(19, 6, 2, 1, 0x3A3A3A); // 機首
+      g.DrawPixel(16, 8, 0x4A3A2A);
+      g.DrawPixel(22, 8, 0x4A3A2A);
+      for (int j = -1; j <= 1; j++) // 水平尾翼
+        for (int i = -7; i <= 7; i++)
+          if (i * i / 49f + j * j / 2.5f <= 1)
+            g.DrawPixel(19 + i, 21 + j, j < 0 ? 0x7A8048u : 0x5E6438u);
+      g.FillRect(18, 15, 2, 7, 0x5A5A38); // 垂直尾翼
+      g.DrawFastVLine(18, 15, 7, 0x7A7A50);
+    }
+
     // 円盤を横から少し見下ろしたところ: 上の面 (銀の皿と溝の輪) が見え、縁は灯りの並ぶ帯、下は厚みのある胴と光る底。
     // 上にガラスのドーム。(x, y) は胴の真ん中。高さは R の 1.25 倍ほど
     static void saucerBox(float R, out int w, out int h, out int cy)
@@ -910,19 +993,39 @@ namespace SkyLark
       bool planeOn = deadT == 0 && !gone && mode != Mode.Continue;
       if (planeOn && !(invT > 0 && (frame / 3) % 2 != 0))
       {
-        cutSprite(g, PLANE, false, null, rpx, rpy, AIR, 1.1f, false, 0.72f);
+        cutBegin(38, 26);
+        planeBack(cv);
+        cutBlit(g, 38, 26, 19, 14, rpx, rpy, AIR, 1.15f, false);
         float sx, sy, sc;
         proj(rpx, rpy, AIR, out sx, out sy, out sc);
-        float k = sc / K * 1.1f;
-        int prY = (int)(sy - 11 * k * 0.72f);
-        if ((frame / 2) % 2 != 0) // 回るプロペラ
-          g.DrawFastHLine((int)(sx - 6 * k), prY, (int)(13 * k), 0xD8D8D0);
-        else
-          g.DrawLine((int)(sx - 5 * k), prY - 1, (int)(sx + 5 * k), prY + 1, 0xB8B8B0);
+        float k = sc / K * 1.15f;
+        // プロペラ: 機首の前で回る、透けた円盤と 2 枚の羽根
+        float nx = sx, ny = sy - 10.5f * k, prx = 8.5f * k, pry = 2.6f * k;
+        for (int j = -(int)pry - 1; j <= (int)pry + 1; j++)
+          for (int i = -(int)prx - 1; i <= (int)prx + 1; i++)
+          {
+            float e = i * i / (prx * prx) + j * j / (pry * pry);
+            if (e <= 1)
+              g.BlendPixel((int)nx + i, (int)ny + j, 0xECECE4, e > 0.75f ? 110 : 55);
+          }
+        float th = frame * 0.9f;
+        for (int b = 0; b < 2; b++)
+        {
+          float t2 = th + b * 0.35f;
+          int x1 = (int)(nx + cosf(t2) * prx), y1 = (int)(ny + sinf(t2) * pry), x2 = (int)(nx - cosf(t2) * prx), y2 = (int)(ny - sinf(t2) * pry);
+          if (b == 0)
+            g.DrawLine(x1, y1, x2, y2, 0x3A3A36);
+          else
+          {
+            g.BlendPixel(x1, y1, 0x3A3A36, 90);
+            g.BlendPixel(x2, y2, 0x3A3A36, 90);
+          }
+        }
+        g.FillRect((int)nx - 1, (int)ny - 1, 2, 2, 0xB8B8B0); // スピナー
         if (muzzleT > 0)
         {
-          glow(g, (int)(sx - 9 * k), (int)(sy - 5 * k), 0xFFF0A0, 2);
-          glow(g, (int)(sx + 8 * k), (int)(sy - 5 * k), 0xFFF0A0, 2);
+          glow(g, (int)(sx - 10 * k), (int)(sy - 1 * k), 0xFFF0A0, 2);
+          glow(g, (int)(sx + 9 * k), (int)(sy - 1 * k), 0xFFF0A0, 2);
         }
       }
       foreach (Shot s in theirs)

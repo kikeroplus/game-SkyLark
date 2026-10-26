@@ -3,7 +3,7 @@ rem Build SKYLARK with the built-in .NET Framework 4 compiler (no SDK needed)
 setlocal
 cd /d "%~dp0"
 set FW=%WINDIR%\Microsoft.NET\Framework64\v4.0.30319
-set SRC=Program.cs Game.cs GameDraw.cs GameDraw25.cs GameDrawB.cs Gfx.cs Sound.cs
+set SRC=Program.cs Game.cs GameDraw.cs GameDraw25.cs GameDrawB.cs GameStory.cs Gfx.cs Sound.cs
 set REFS=/r:System.Windows.Forms.dll /r:System.Drawing.dll
 
 rem First build only: make SkyLark.ico with the exe itself

@@ -81,19 +81,41 @@ namespace SkyLark
         cutCol = new int[n * 2];
       }
       Array.Clear(cutMask, 0, n);
+      // 色は、元の絵のとなりあう 4 つの点を混ぜて決める (拡大縮小しても点の大きさが不ぞろいにならず、ギザギザが目立たない)。
+      // 透明の点は混ぜず、絵のある割合が半分以上なら塗る
       int key = src.Key;
       bool any = false;
       for (int j = 0; j < dh; j++)
       {
-        int syy = Math.Min(sh - 1, (int)(j / scy)) * src.W;
+        float v = (j + 0.5f) / scy - 0.5f;
+        int vy0 = (int)Math.Floor(v);
+        float fy = v - vy0;
         for (int i = 0; i < dw; i++)
         {
-          int c = src.Buf[syy + Math.Min(sw - 1, (int)(i / scx))];
-          if (c == key)
+          float u = (i + 0.5f) / scx - 0.5f;
+          int ux0 = (int)Math.Floor(u);
+          float fx = u - ux0, cov = 0, sr = 0, sg = 0, sb = 0;
+          for (int k = 0; k < 4; k++)
+          {
+            int xx = ux0 + (k & 1), yy = vy0 + (k >> 1);
+            float w = ((k & 1) != 0 ? fx : 1 - fx) * ((k >> 1) != 0 ? fy : 1 - fy);
+            if (w <= 0)
+              continue;
+            xx = xx < 0 ? 0 : xx >= sw ? sw - 1 : xx;
+            yy = yy < 0 ? 0 : yy >= sh ? sh - 1 : yy;
+            int c = src.Buf[yy * src.W + xx];
+            if (c == key)
+              continue;
+            cov += w;
+            sr += ((c >> 16) & 255) * w;
+            sg += ((c >> 8) & 255) * w;
+            sb += (c & 255) * w;
+          }
+          if (cov < 0.5f)
             continue;
           int m = (j + 2) * mw + i + 2;
           cutMask[m] = 1;
-          cutCol[m] = c;
+          cutCol[m] = ((int)(sr / cov) << 16) | ((int)(sg / cov) << 8) | (int)(sb / cov);
           any = true;
         }
       }
