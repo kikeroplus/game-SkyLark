@@ -1,5 +1,5 @@
 // SKYLARK の窓。320x540 の絵を 2 倍 (640x1080) に引き伸ばして出す。窓の大きさを変えても縦横比は保つ。
-// 1 秒 30 回ゲームを進め、1 秒 60 回描く (動くもののあいだを補ってなめらかに見せる)。キーボードと XInput のゲームパッドで操作する。
+// 1 秒 30 回ゲームを進め、1 秒 60 回描く (動くもののあいだを補ってなめらかに見せる)。キーボードと XInput のゲームパッド、ふつうの USB ゲームパッド (SkyLark Joystick など) で操作する。
 // 設定とランキングは %APPDATA%\SkyLark\ に、1 つにつき小さなテキストファイル 1 つで残す
 using System;
 using System.Diagnostics;
@@ -103,6 +103,112 @@ namespace SkyLark
     }
   }
 
+  // XInput でない USB ゲームパッド (SkyLark Joystick など。Windows の「ゲームコントローラー」に出るもの) を winmm で読む。
+  // Xbox 系 (マイクロソフトの機器) は XInput で読むので除く。つながっていないときは 2 秒ごとに探しなおす
+  static class Joy
+  {
+    [StructLayout(LayoutKind.Sequential)]
+    public struct Info
+    {
+      public uint Size, Flags, X, Y, Z, R, U, V, Buttons, ButtonNumber, Pov, Reserved1, Reserved2;
+    }
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    struct Caps
+    {
+      public ushort Mid, Pid;
+      [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string Name;
+      public uint Xmin, Xmax, Ymin, Ymax, Zmin, Zmax, NumButtons, PeriodMin, PeriodMax, Rmin, Rmax, Umin, Umax, Vmin, Vmax, CapsFlags, MaxAxes, NumAxes, MaxButtons;
+      [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string RegKey;
+      [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] public string OemVxd;
+    }
+    [DllImport("winmm.dll")] static extern int joyGetPosEx(int id, ref Info info);
+    [DllImport("winmm.dll", CharSet = CharSet.Unicode, EntryPoint = "joyGetDevCapsW")] static extern int joyGetDevCaps(IntPtr id, ref Caps caps, int size);
+    [DllImport("winmm.dll")] static extern int joyGetNumDevs();
+    const uint JOY_RETURNALL = 0xFF;
+    const ushort MICROSOFT = 0x045E;
+
+    static bool broken;
+    static int id = -1;
+    static uint xmin, xmax, ymin, ymax;
+    static long nextScan;
+
+    static bool Read(int i, out Info info)
+    {
+      info = new Info();
+      info.Size = (uint)Marshal.SizeOf(typeof(Info));
+      info.Flags = JOY_RETURNALL;
+      return joyGetPosEx(i, ref info) == 0;
+    }
+
+    // -1〜1 (遊びを抜いたもの)
+    static float Axis(uint v, uint lo, uint hi)
+    {
+      if (hi <= lo)
+        return 0;
+      float n = (v - (float)lo) / (hi - lo) * 2 - 1;
+      const float dead = 0.15f;
+      float a = Math.Abs(n);
+      return a < dead ? 0 : Math.Sign(n) * Math.Min(1, (a - dead) / (1 - dead));
+    }
+
+    // ax・ay は右・下が正。buttons はボタン 1 が 0x1。pov は十字 (Pad の UP・DOWN・LEFT・RIGHT と同じビット)
+    public static bool Poll(out float ax, out float ay, out uint buttons, out int pov)
+    {
+      ax = ay = 0;
+      buttons = 0;
+      pov = 0;
+      if (broken)
+        return false;
+      try
+      {
+        Info info = new Info();
+        if (id >= 0 && !Read(id, out info))
+          id = -1;
+        if (id < 0)
+        {
+          long now = Environment.TickCount;
+          if (now < nextScan)
+            return false;
+          nextScan = now + 2000;
+          int n = Math.Min(16, joyGetNumDevs());
+          for (int i = 0; i < n && id < 0; i++)
+          {
+            Caps c = new Caps();
+            if (joyGetDevCaps((IntPtr)i, ref c, Marshal.SizeOf(typeof(Caps))) != 0 || c.Mid == MICROSOFT)
+              continue;
+            Info t;
+            if (!Read(i, out t))
+              continue;
+            id = i;
+            xmin = c.Xmin;
+            xmax = c.Xmax;
+            ymin = c.Ymin;
+            ymax = c.Ymax;
+          }
+          if (id < 0 || !Read(id, out info))
+            return false;
+        }
+        ax = Axis(info.X, xmin, xmax);
+        ay = Axis(info.Y, ymin, ymax);
+        buttons = info.Buttons;
+        if (info.Pov <= 36000)
+        {
+          int d = (int)info.Pov;
+          if (d >= 31500 || d <= 4500) pov |= Pad.UP;
+          if (d >= 4500 && d <= 13500) pov |= Pad.RIGHT;
+          if (d >= 13500 && d <= 22500) pov |= Pad.DOWN;
+          if (d >= 22500 && d <= 31500) pov |= Pad.LEFT;
+        }
+        return true;
+      }
+      catch (Exception)
+      {
+        broken = true;
+        return false;
+      }
+    }
+  }
+
   class MainForm : Form
   {
     readonly Game game = new Game();
@@ -113,6 +219,8 @@ namespace SkyLark
     bool fireHit, startHit, pauseHit, quitHit, backHit, bombHit, upHit, downHit, leftHit, rightHit;
     char typed;
     ushort padPrev;
+    uint joyPrev;
+    int joyDirPrev;
     bool fullscreen;
     Rectangle normalBounds;
     string osd;
@@ -432,6 +540,51 @@ namespace SkyLark
       }
       else
         padPrev = 0;
+
+      // XInput でないゲームパッド。割り当ては ESP32 版 (SkyLarkESP32) と同じ:
+      // ボタン 1 (SW1) 撃つ、ボタン 2 (SW2) 爆弾・戻る・やめる、ボタン 3 (SW3) 一時停止・スタート、ボタン 4 (押し込み) ゆっくり
+      float jx, jy;
+      uint jb;
+      int pov;
+      if (Joy.Poll(out jx, out jy, out jb, out pov))
+      {
+        uint jhit = jb & ~joyPrev;
+        joyPrev = jb;
+        if (Math.Abs(jx) > Math.Abs(inp.AX))
+          inp.AX = jx;
+        if (Math.Abs(jy) > Math.Abs(inp.AY))
+          inp.AY = jy;
+        // スティックを倒した向きと十字を、矢印キーとして扱う (倒した瞬間も。名前の入力などで使う)
+        int dir = pov;
+        if (jx <= -0.5f) dir |= Pad.LEFT;
+        if (jx >= 0.5f) dir |= Pad.RIGHT;
+        if (jy <= -0.5f) dir |= Pad.UP;
+        if (jy >= 0.5f) dir |= Pad.DOWN;
+        int dhit = dir & ~joyDirPrev;
+        joyDirPrev = dir;
+        inp.Left |= (dir & Pad.LEFT) != 0;
+        inp.Right |= (dir & Pad.RIGHT) != 0;
+        inp.Up |= (dir & Pad.UP) != 0;
+        inp.Down |= (dir & Pad.DOWN) != 0;
+        inp.UpPressed |= (dhit & Pad.UP) != 0;
+        inp.DownPressed |= (dhit & Pad.DOWN) != 0;
+        inp.LeftPressed |= (dhit & Pad.LEFT) != 0;
+        inp.RightPressed |= (dhit & Pad.RIGHT) != 0;
+        inp.Fire |= (jb & 0x1) != 0;
+        inp.FirePressed |= (jhit & 0x1) != 0;
+        inp.Bomb |= (jb & 0x2) != 0;
+        inp.BombPressed |= (jhit & 0x2) != 0;
+        inp.BackPressed |= (jhit & 0x2) != 0;
+        inp.QuitPressed |= (jhit & 0x2) != 0;
+        inp.StartPressed |= (jhit & 0x4) != 0;
+        inp.PausePressed |= (jhit & 0x4) != 0;
+        inp.Slow |= (jb & 0x8) != 0;
+      }
+      else
+      {
+        joyPrev = 0;
+        joyDirPrev = 0;
+      }
       return inp;
     }
 
